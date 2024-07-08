@@ -1,0 +1,91 @@
+---
+title: "Namibia QDFD Model Fitting"
+author: "Amon"
+date: "`r Sys.Date()`"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r}
+library(readxl) 
+library(dplyr)
+NUST24H_QFM_Np<-read_xls(file.choose())
+str(NUST24H_QFM_Np)
+```
+
+
+```{r}
+
+#Defining the variables
+y<-NUST24H_QFM_Np$GHI_Avg
+t<-NUST24H_QFM_Np$Time
+p_r<-NUST24H_QFM_Np$Percentile
+M_r<-NUST24H_QFM_Np$MedianRankit
+#Applying the LAD to fit the parameters
+library(quantreg)
+library(stargazer)
+library(ISLR)
+library(MASS)
+set.seed(142)
+GHI_QFDM<-rq(y~cos(pi*t/12)+sin(pi*t/12)+cos(2*pi*t/12)+sin(2*pi*t/12)+cos(3*pi*t/12)+sin(3*pi*t/12)+M_r)
+stargazer(GHI_QFDM, type="text")
+
+#Goodness of fit using the Hosmer and Lemeshow test when using the glm package
+library(ResourceSelection)
+QFDM<- model.frame(GHI_QFDM)
+hl<-hoslem.test(QFDM$y, fitted(GHI_QFDM), g=10)
+hl
+
+#Validating the model using the fitted response values
+library(mosaic)
+y_hat<-fitted(GHI_QFDM)
+plot(y_hat,y)
+#abline(lm(y~y_hat), col="blue")
+#Validating the model using the distributional residuals
+e_QFDM<-resid(GHI_QFDM)
+plot(e_QFDM, y_hat)
+
+
+#Runs test
+library(randtests)
+runs.test(y_hat)
+```
+```{r}
+#Calculating the population mean using the QDFM for 1200hours
+intergrand<-function(p_r){267.822-400.598*cos(pi*12/12)-137.335*sin(pi*12/12)+159.851*cos(2*pi*12/12)+114.200*sin(2*pi*12/12)-27.070*cos(3*pi*12/12)-29.389*sin(3*pi*12/12)+(3676.631/(2*21.3035529))*((1+0.162308)*p_r^(21.3035529)-(1-0.162308)*(1-p_r)^(21.3035529))}
+integrate(intergrand, lower=0, upper=1)
+
+#Calculating the population mean using the QDFM for 1200hours
+intergrand<-function(p_r){267.822-400.598*cos(pi*13/12)-137.335*sin(pi*13/12)+159.851*cos(2*pi*13/12)+114.200*sin(2*pi*13/12)-27.070*cos(3*pi*13/12)-29.389*sin(3*pi*13/12)+(3676.631/(2*21.3035529))*((1+0.162308)*p_r^(21.3035529)-(1-0.162308)*(1-p_r)^(21.3035529))}
+integrate(intergrand, lower=0, upper=1)
+
+#Calculating the population mean using the QDFM for 1200hours
+intergrand<-function(p_r){267.822-400.598*cos(pi*14/12)-137.335*sin(pi*14/12)+159.851*cos(2*pi*14/12)+114.200*sin(2*pi*14/12)-27.070*cos(3*pi*14/12)-29.389*sin(3*pi*14/12)+(3676.631/(2*21.3035529))*((1+0.162308)*p_r^(21.3035529)-(1-0.162308)*(1-p_r)^(21.3035529))}
+integrate(intergrand, lower=0, upper=1)
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

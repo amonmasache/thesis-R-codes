@@ -1,0 +1,115 @@
+---
+title: "NUST24HClean-N(p)" 
+author: "Amon"
+date: "`r Sys.Date()`"
+output:
+  word_document: default
+  html_document: default
+---
+```{r}
+library(readxl)
+library(dplyr)
+NUST24HClean<-read_xls(file.choose())
+str(NUST24HClean)
+```
+
+```{r}
+#Defining the hourly time variable and the Solar irradiance variable
+#library(mosaic)
+t<-NUST24HClean$Time
+y<-NUST24HClean$GHI_Avg
+summary(y)
+summary(t)
+
+#Finding the best hourly SI model
+library(quantreg)
+library(stargazer)
+library(ISLR)
+library(MASS)
+set.seed(142)
+GHI_1<-rq(y~cos(pi*t/12)+sin(pi*t/12)+cos(2*pi*t/12)+sin(2*pi*t/12)+cos(3*pi*t/12)+sin(3*pi*t/12))
+stargazer(GHI_1)
+e<-resid(GHI_1)
+
+#Finding the best probability distribution of residuals
+library(gamlss)
+library(fitdistrplus)
+output<-fitDist(e, type="realAll")
+output$family
+output$Allpar
+summary(e)
+
+```
+
+
+```{r}
+#Finding the best distribution that has got an existent quantile function
+library(MASS)
+library(gamlss)
+library("fitdistrplus")
+library(actuar)
+
+#Checking for the possible probability distributions
+#plotdist(y, histo=TRUE, demp=T)
+#descdist(y, boot=1000)
+#summary(y)
+
+#Fitting the distributions and comparing them
+#y <- y[y>0]
+#y
+#fw <- fitdist(e, "weibull")
+#fpa<- fitdist(e, "pareto", start = list(shape = 1, scale = 500))
+#fbu <- fitdist(e, "burr", start=list(shape1=0.3, shape2=1))
+#fln <- fitdist(e, "lnorm")
+#fll<- fitdist(e, "llogis")
+fn <- fitdist(e, "norm")
+fchy <- fitdist(e, "cauchy")
+
+
+#Comparing how the fitted distributions compare with the histogram of the data
+hist(e, freq=FALSE)
+range=seq(-35,40,1)
+plot.legend <- c("Normal", "Cauchy")
+denscomp(list(fn, fchy), legendtext = plot.legend)
+#lines(range, dweibull(range,fw$estimate[1],fw$estimate[2]), col="black")
+#lines(range, dlnorm(range,fln$estimate[1],fln$estimate[2]), col="blue")
+#lines(range, dllogis(range,fll$estimate[1],fll$estimate[2]), col="green")
+#lines(range, dnorm(range,fn$estimate[1],fn$estimate[2]), col="red")
+#lines(range, dcauchy(range,fchy$estimate[1],fchy$estimate[2]), col="yellow")
+
+#Checking on the goodness of fit of the fitted distributions
+gofstat(list(fn,fchy),
+fitnames = c("normal", "cauchy"))
+
+#Getting the parameter estimates for the best distribution.
+print(fn)
+
+library(e1071)
+skewness(e)
+```
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

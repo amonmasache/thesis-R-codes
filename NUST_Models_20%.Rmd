@@ -1,0 +1,1137 @@
+---
+title: "Windhoek QR Models - Hourly Time Horizon"
+author: "Amon"
+date: "`r Sys.Date()`"
+output:
+  word_document: default
+  html_document: default
+---
+```{r}
+#Reading the data frame from NUST solar irradiance radiometric station.
+library(readxl)  
+library(dplyr) 
+Windhoek<-read_xls(file.choose())
+str(Windhoek)
+```
+
+
+```{r}
+##Imputing some missing values
+library(Hmisc)
+
+#using argImpute function
+nust.imp_arg <- aregImpute(~ GHI + Hour + DHI + DNI + Temp + RH + WS + WD + BP, data = Windhoek, n.impute = 1)
+nust.imp_arg
+
+#Check imputed variable GHI
+nust.imp_arg$imputed$GHI
+
+#Check imputed variable GHI
+nust.imp_arg$imputed$DNI
+
+#Check imputed variable GHI
+nust.imp_arg$imputed$DHI
+
+
+write.table(nust.imp_arg$imputed$DHI,"~/DHIimputed.txt",sep="\t")
+
+#Check imputed variable GHI
+nust.imp_arg$imputed$Temp
+
+
+write.table(nust.imp_arg$imputed$Temp,"~/Tempimputed.txt",sep="\t")
+
+
+#Check imputed variable GHI
+nust.imp_arg$imputed$RH
+
+
+write.table(nust.imp_arg$imputed$RH,"~/RHimputed.txt",sep="\t")
+
+#Check imputed variable GHI
+nust.imp_arg$imputed$WS
+
+#Working with a clean data set
+library(readxl)
+library(dplyr) 
+nust<-read_xls(file.choose())
+
+#Creating a new data frame
+new.nust=subset(nust,nust$GHI>0.1)
+new.nust<-subset(new.nust,select=-c(ObsNo))
+dim(new.nust)
+str(new.nust)
+#write.table(new.unv,"~/newunv.txt",sep="\t")
+```
+
+
+```{r}
+##GHI graphical exploration to show that the response is not normal.
+library(tuneR)
+attach(new.nust)
+head(new.nust)
+win.graph()
+
+
+
+par(mfrow=c(2,2))
+y <- ts(GHI)
+plot(y, ylab="GHI", xlab="Observation number", main="GHI")
+plot(density(y),xlab= "GHI", 
+     main="Density ")
+qqnorm(y, main="Normal QQ-plot")
+qqline(y)
+boxplot(y, horizontal = TRUE, main="Box plot", 
+        xlab= "GHI")
+
+```
+
+
+```{r}
+#Adding the lagged variables to the data frame to model the trend in the time series.
+#Creating the new variables
+library(dplyr)
+attach(new.nust)
+new.nust<-subset(new.nust, select=-c(DHI,DNI))
+str(new.nust)
+
+#Creating a 1 lagged variable
+new.nust.lag1<-new.nust %>%
+  mutate(Lag1=lag(new.nust$GHI,1)) %>%
+  as.data.frame()
+
+#Creating a 2 lagged variable
+new.nust.lag2<-new.nust.lag1 %>%
+  mutate(Lag2=lag(new.nust.lag1$GHI,2)) %>%
+  as.data.frame()
+
+#Removing rows with missing lagged values
+nust.new<-new.nust.lag2[-1,]
+nust.lags<-nust.new[-1,]
+head(nust.lags)
+```
+
+
+```{r}
+#Variable selection using LASSO with Hierachichal pairwise interactions
+library(hierNet)
+
+attach(nust.lags)
+
+#Defining the training variables
+Data_x<-model.matrix(GHI~., nust.lags)[,-1]
+Data_y<-nust.lags$GHI
+
+#Running the variable selections
+set.seed(111)
+Selection<-hierNet.path(Data_x,Data_y)
+Selection_cv<-hierNet.cv(Selection,Data_x,Data_y)
+print(Selection_cv)
+lamhat=Selection_cv$lamhat.1se
+Selection_cv1=hierNet(Data_x,Data_y,lam=lamhat)
+print(Selection_cv1)
+```
+
+
+```{r}
+##Adding interaction effects as variables into the data frame
+#Note that the main effect of BP is insignificant
+library(dplyr)
+
+#Creating the 1st interaction effect variable
+nust.lags.Int1<-nust.lags %>%
+  mutate(Int1=Hour*Temp) %>%
+  as.data.frame()
+
+#Creating the 2nd interaction effect variable
+nust.lags.Int2<-nust.lags.Int1 %>%
+  mutate(Int2=Hour*RH) %>%
+  as.data.frame()
+
+#Creating the 2rd interaction effect variable
+nust.lags.Int3<-nust.lags.Int2 %>%
+  mutate(Int3=Hour*Lag1) %>%
+  as.data.frame()
+
+#Creating the 4th interaction effect variable
+nust.lags.Int4<-nust.lags.Int3 %>%
+  mutate(Int4=Temp*WS) %>%
+  as.data.frame()
+
+#Creating the 5th interaction effect variable
+nust.lags.Int5<-nust.lags.Int4 %>%
+  mutate(Int5=Temp*Lag1) %>%
+  as.data.frame()
+
+#Creating the 6th interaction effect variable
+nust.lags.Int6<-nust.lags.Int5 %>%
+  mutate(Int6=RH*Lag1) %>%
+  as.data.frame()
+
+#Creating the 6th interaction effect variable
+nust.lags.Int7<-nust.lags.Int6 %>%
+  mutate(Int7=RH*Lag2) %>%
+  as.data.frame()
+
+#Creating the 6th interaction effect variable
+nust.lags.Int8<-nust.lags.Int7 %>%
+  mutate(Int8=Lag1*Lag2) %>%
+  as.data.frame()
+
+#Removing the BP which has an insignificant main effect.
+nust.lags.intrs<-subset(nust.lags.Int8,select=-c(WD))
+str(nust.lags.intrs)
+```
+
+
+
+```{r}
+#Stationarity analysismof the covariates
+options(scipen=999)
+library(tseries)
+attach(nust.lags.intrs)
+
+#Testing for stationarity
+
+jarque.bera.test(GHI)
+
+kpss.test(GHI)
+
+var(GHI)
+
+var(Hour)
+
+var(RH)
+
+var(Temp)
+
+var(WS)
+
+var(BP)
+
+var(Lag1)
+
+summary(Lag2)
+
+cov(GHI, Hour)
+
+#Finding the best probability distribution of variables
+library(gamlss)
+library(fitdistrplus)
+attach(nust.lags.intrs)
+SimuGHI<-fitDist(GHI, type="realAll")
+SimuGHI$family
+SimuGHI$Allpar
+summary(GHI)
+
+SimuHour<-fitDist(Hour, type="realAll")
+SimuHour$family
+SimuHour$Allpar
+summary(Hour)
+
+SimuRH<-fitDist(RH, type="realAll")
+SimuRH$family
+SimuRH$Allpar
+summary(RH)
+
+SimuTemp<-fitDist(Temp, type="realAll")
+SimuTemp$family
+SimuTemp$Allpar
+summary(Temp)
+
+SimuWS<-fitDist(WS, type="realAll")
+SimuWS$family
+SimuWS$Allpar
+summary(WS)
+
+SimuBP<-fitDist(BP, type="realAll")
+SimuBP$family
+SimuBP$Allpar
+summary(BP)
+
+SimuLag1<-fitDist(Lag1, type="realAll")
+SimuLag1$family
+SimuLag1$Allpar
+summary(Lag1)
+
+SimuLag2<-fitDist(Lag2, type="realAll")
+SimuLag2$family
+SimuLag2$Allpar
+summary(Lag2)
+var(Lag2)
+
+SimuInt1<-fitDist(Int1, type="realAll")
+SimuInt1$family
+SimuInt1$Allpar
+
+SimuInt2<-fitDist(Int2, type="realAll")
+SimuInt2$family
+SimuInt2$Allpar
+
+SimuInt3<-fitDist(Int3, type="realAll")
+SimuInt3$family
+SimuInt3$Allpar
+
+SimuInt4<-fitDist(Int4, type="realAll")
+SimuInt4$family
+SimuInt4$Allpar
+
+SimuInt5<-fitDist(Int5, type="realAll")
+SimuInt5$family
+SimuInt5$Allpar
+
+
+SimuInt6<-fitDist(Int6, type="realAll")
+SimuInt6$family
+SimuInt6$Allpar
+
+
+SimuInt7<-fitDist(Int7, type="realAll")
+SimuInt7$family
+SimuInt7$Allpar
+
+SimuInt8<-fitDist(Int8, type="realAll")
+SimuInt8$family
+SimuInt8$Allpar
+summary(Int8)
+var(Int8)
+
+mean(Int7)
+var(Int7)
+
+mean(Int6)
+var(Int6)
+
+mean(Int5)
+var(Int5)
+
+mean(Int4)
+var(Int4)
+
+mean(Int3)
+var(Int3)
+
+mean(Int2)
+var(Int2)
+
+mean(Int1)
+var(Int1)
+```
+
+
+
+
+```{r}
+##Identifying variables with linear effects
+#Running the PLAQR with linear effects
+library(plaqr)
+attach(nust.lags.intrs)
+
+set.seed(100)
+
+ss <- vector("list", 2)
+ss[[2]]$degree <- 3
+ss[[2]]$Boundary.knots <- c(-1, 1)
+
+plaqr.linear <- plaqr(GHI~., data = nust.lags.intrs, splinesettings=ss)
+summary(plaqr.linear)
+```
+
+
+```{r}
+# Split the data into training (90%) and testing (10%) sets
+set.seed(123)  # Set seed for reproducibility
+train_size <- 0.8
+num_rows <- nrow(nust.lags.intrs)
+train_indices <- sample(1:num_rows, size = round(train_size * num_rows))
+train_data <- nust.lags.intrs[train_indices, ]
+test_data <- nust.lags.intrs[-train_indices, ]
+
+# Define the target variable
+target_variable <- "GHI"  # Replace with your actual target variable name
+```
+
+
+```{r}
+###Fitting the plaqr model
+#install.packages("plaqr")
+library(plaqr)
+#install.packages("Metrics")
+library(Metrics)
+library(quantreg)
+library(SparseM)
+library(ggplot2)
+library(grid)
+library(plaqr)
+library(forecast)
+library(verification)
+library(scoringRules)
+library(scoringutils)
+library(dplyr)
+library(lmtest)
+library(tseries)
+library(Qtools)
+library(tidyverse)
+
+attach(nust.lags.intrs)
+str(nust.lags.intrs)
+
+set.seed(130)
+##Comparing the plaqr model at different quantile levels
+list.of.fits<-list()
+
+for(i in 1:9){
+  fit.name<-paste0('tau',i/10)
+  list.of.fits[[fit.name]]<-(plaqr(formula= GHI~Hour+Lag1+Lag2,nonlinVars= ~ Temp+RH+WS+WD+Int1+Int2+Int3+Int4+Int5+Int6+Int7+Int8+Int9+Int10+Int11+Int12+Int13+Int14+Int15+Int16+Int17+Int18, tau=i/10,data=train_data))
+  }
+
+results1<-data.frame()
+
+for(i in 1:9){
+  fit.name<-paste0('tau',i/10)
+  predicted<-(predict(list.of.fits[[fit.name]], 
+                      test_data[, -which(names(test_data) == target_variable)]))
+  
+  rmse<-sqrt(mean(predicted-actual_values)^2)
+  temp<-data.frame(tau=i/10,fit.name=fit.name,rmse=rmse)
+  results1<-rbind(results1,temp)
+}
+results1
+
+set.seed(140)
+# Train the plaqr model at the best quantile level using the training set
+plaqr <- plaqr(formula= GHI~Hour+Lag1+Lag2,nonlinVars= ~ Temp+RH+WS+BP+Int1+Int2+Int3+Int4+Int5+Int6+Int7+Int8, tau=0.5,data=train_data)
+
+
+############################################
+########   Model diagnostics   #############
+############################################
+
+##Checking autocorrelation on residuals.
+#Breusch-Godfrey test
+bgtest(plaqr, order=3, data=train_data)
+
+#Box-Ljung test
+e.plaqr<-resid(plaqr)
+Box.test(e.plaqr, type="Ljung")
+
+#Testing whether residuals are white noise.
+library(gamlss)
+library(fitdistrplus)
+output<-fitDist(e.plaqr, type="realAll")
+output$family
+output$Allpar
+
+library(tseries)
+#Testing for normality
+
+jarque.bera.test(e.plaqr)
+
+#Using the r-squared value
+# Make predictions on the testing set
+fcs_plaqr <- predict(plaqr, test_data[, -which(names(test_data) == target_variable)])
+
+write.table(fcs_plaqr,"~/fcs_plaqr_nust.txt",sep="\t")
+
+actual_values <- test_data[[target_variable]]
+write.table(actual_values,"~/y_nust_20.txt",sep="\t")
+
+r_squared.plaqr <- cor(fcs_plaqr, actual_values)^2
+r_squared.plaqr
+
+AIC(plaqr)
+
+##Cross validation analysis
+
+fcs_plaqr.80 <- predict(plaqr, train_data)
+write.table(fcs_plaqr.80,"~/fcs_plaqr_nust_80.txt",sep="\t")
+
+y.train <- train_data[[target_variable]]
+write.table(y.train,"~/y_nust_80.txt",sep="\t")
+
+##############################################
+######      Performance evaluation     #######
+##############################################
+
+
+######   PINBALL LOSS FUNCTION   ######
+
+library(devtools)
+library(gtools)
+library(gefcom2017)
+## tau: integer 1, 2, ... 99. Quantile to calculate pinball loss score for.
+## y: numeric. Observed value.
+## q: numeric. Predicted value for quantile tau.
+#' Calculates the pinball loss score for a given quantile.
+pinball_loss.plaqr <- function(tau, y, q) {
+  pl_df <- data.frame(tau = tau,
+                      y = y,
+                      q = q)
+  pl_df <- pl_df %>%
+    mutate(L.plaqr = ifelse(y>=q,
+                      tau/100 * (y-q),
+                      (1-tau/100) * (q-y)))
+  return(pl_df)
+}
+tau= 50 # tau = 75, 90, 95, 99, etc
+y= actual_values
+q= fcs_plaqr
+
+z.plaqr = pinball_loss.plaqr(tau, y, q)
+#z
+#write.table(z,"~/pinballfplLassoI.txt",sep="\t") 
+
+qloss.plaqr =z.plaqr$L.plaqr
+mean(qloss.plaqr)
+
+#win.graph
+#a.plaqr=ts(qloss.plaqr)
+#plot(a.plaqr)
+
+######   THE WINKLER SCORE   ######
+
+library(devtools)
+library(scoringRules)
+
+winkler_score.plaqr <- function(observed, predicted, alpha) {
+  if (length(observed) != length(predicted)) {
+    stop("Lengths of observed and predicted vectors must be the same.")
+  }
+    n <- length(observed)
+  score <- 0
+    for (i in 1:n) {
+    score <- score + (1 - abs(predicted[i] - observed[i]) / alpha) * pmin(predicted[i], observed[i])
+  }
+    return(score)
+}
+observed=actual_values
+predicted=fcs_plaqr
+alpha=95
+
+winkler.plaqr = winkler_score.plaqr(observed, predicted, alpha)/sum(actual_values)
+winkler.plaqr
+
+######   CRPS EVALUATION   ######
+
+crps.plaqr<-crps(actual_values, family = "normal", mean = mean(fcs_plaqr), sd = sd(fcs_plaqr))
+mean(crps.plaqr)
+
+##Finding the prediction interval for future values
+CI.plaqr<-predictInt(plaqr, level=.95, newdata=test_data)
+
+write.table(CI.plaqr,"~/PLAQR_CI_nust.txt",sep="\t")
+
+#Calculating the Coverage Probability
+library(readxl)  
+library(dplyr) 
+PLAQR_CI_NUST<-read_xls(file.choose())
+head(PLAQR_CI_NUST)
+ 
+CP.plaqr<-mean(1*(PLAQR_CI_NUST$y.test>PLAQR_CI_NUST$lwr&PLAQR_CI_NUST$y.test<PLAQR_CI_NUST$upr))
+CP.plaqr
+
+###Plotting the graph of the forecasts on the observed data
+actual_values <- ts(actual_values)
+fcs_plaqr <- ts(fcs_plaqr)
+accuracy(fcs_plaqr, actual_values)
+
+step_size <- 1
+mase(actual_values, fcs_plaqr, step_size)
+
+#win.graph()
+#plot(actual_values)
+#lines(fcs_plaqr,col="red")
+```
+
+
+
+
+```{r}
+#Fitting an Additive QR model
+library(quantreg)
+library(tseries)
+library(forecast)
+library(verification)
+library(scoringRules)
+library(scoringutils)
+library(dplyr)
+library(lmtest)
+library(Qtools)
+library(tidyverse)
+library(splines)
+
+set.seed(150)
+##Comparing the aqr model at different quantile levels
+list.of.fits<-list()
+
+for(i in 1:9){
+  fit.name<-paste0('tau',i/10)
+  list.of.fits[[fit.name]]<-(rqss(GHI~Hour+Lag1+Lag2+Temp+RH+WS+BP+Int1+Int2+Int3+Int4+Int5+Int6+Int7+Int8, tau=i/10,data=train_data))
+  }
+
+results2<-data.frame()
+
+for(i in 1:9){
+  fit.name<-paste0('tau',i/10)
+  predicted<-(predict(list.of.fits[[fit.name]],
+                      test_data[, -which(names(test_data) == target_variable)]))
+  
+  rmse<-sqrt(mean(predicted-actual_values)^2)
+  temp<-data.frame(tau=i/10,fit.name=fit.name,rmse=rmse)
+  results2<-rbind(results2,temp)
+}
+results2
+
+set.seed(160)
+###Using the rqss function
+aqr<- rqss(GHI~Hour+Lag1+Lag2+Temp+RH+WS+BP+Int1+Int2+Int3+Int4+Int5+Int6+Int7+Int8,tau=0.5, data = train_data)
+
+############################################
+########   Model diagnostics   #############
+############################################
+
+##Checking autocorrelation on residuals.
+#Breusch-Godfrey test
+bgtest(aqr, order=3, data=train_data)
+
+#Box-Ljung test
+e.aqr<-resid(aqr)
+Box.test(e.aqr, type="Ljung")
+
+
+#Using the r-squared value
+# Make predictions on the testing set
+fcs_aqr <- predict(aqr, test_data[, -which(names(test_data) == target_variable)])
+
+write.table(fcs_aqr,"~/fcs_aqr_nust.txt",sep="\t")
+
+r_squared.aqr <- cor(fcs_aqr, actual_values)^2
+r_squared.aqr
+
+AIC(aqr)
+
+##Cross validation analysis
+fcs_aqr.80 <- predict(aqr, train_data)
+write.table(fcs_aqr.80,"~/fcs_aqr_nust_80.txt",sep="\t")
+
+##########################################################
+######    Sharpness and Reliability evaluation     #######
+##########################################################
+
+
+######   PINBALL LOSS FUNCTION   ######
+
+library(devtools)
+library(gtools)
+library(gefcom2017)
+## tau: integer 1, 2, ... 99. Quantile to calculate pinball loss score for.
+## y: numeric. Observed value.
+## q: numeric. Predicted value for quantile tau.
+#' Calculates the pinball loss score for a given quantile.
+pinball_loss.aqr <- function(tau, y, q) {
+  pl_df <- data.frame(tau = tau,
+                      y = y,
+                      q = q)
+  pl_df <- pl_df %>%
+    mutate(L.aqr = ifelse(y>=q,
+                      tau/100 * (y-q),
+                      (1-tau/100) * (q-y)))
+  return(pl_df)
+}
+tau= 50 # tau = 75, 90, 95, 99, etc
+y= actual_values
+q= fcs_aqr
+
+z.aqr = pinball_loss.aqr(tau, y, q)
+#z
+#write.table(z,"~/pinballfplLassoI.txt",sep="\t") 
+
+qloss.aqr =z.aqr$L.aqr
+mean(qloss.aqr)
+
+#win.graph
+#a.aqr=ts(qloss.aqr)
+#plot(a.aqr)
+
+######   THE WINKLER SCORE   ######
+
+library(devtools)
+library(scoringRules)
+
+winkler_score.aqr <- function(observed, predicted, alpha) {
+  if (length(observed) != length(predicted)) {
+    stop("Lengths of observed and predicted vectors must be the same.")
+  }
+    n <- length(observed)
+  score <- 0
+    for (i in 1:n) {
+    score <- score + (1 - abs(predicted[i] - observed[i]) / alpha) * pmin(predicted[i], observed[i])
+  }
+    return(score)
+}
+observed=actual_values
+predicted=fcs_aqr
+alpha=95
+
+winkler.aqr = winkler_score.aqr(observed, predicted, alpha)/sum(actual_values)
+winkler.aqr
+
+
+######   CRPS EVALUATION   ######
+
+crps.aqr<-crps(actual_values, family = "normal", mean = mean(fcs_aqr), sd = sd(fcs_aqr))
+mean(crps.aqr)
+
+##Finding the prediction interval for future values
+
+CI.aqr<-predict(aqr, test_data, interval = "confidence", level = 0.95)
+
+write.table(CI.aqr,"~/AQR_CI_NUST.txt",sep="\t")
+
+#Calculating the Coverage Probability
+library(readxl)  
+library(dplyr) 
+AQR_CI_NUST<-read_xls(file.choose())
+head(AQR_CI_NUST)
+ 
+CP.aqr<-mean(1*(AQR_CI_NUST$y.test>AQR_CI_NUST$ylower&AQR_CI_NUST$y.test<AQR_CI_NUST$yupper))
+CP.aqr
+
+###Plotting the graph of the forecasts on the observed data
+actual_values <- ts(actual_values)
+fcs_aqr <- ts(fcs_aqr)
+accuracy(fcs_aqr, actual_values)
+
+
+step_size <- 1
+mase(actual_values, fcs_aqr, step_size)
+#win.graph()
+#plot(actual_values)
+#lines(fcs_aqr,col="red")
+
+#summary(aqr)
+
+#checkresiduals(aqr)
+```
+
+
+```{r}
+#Fitting a Quantile Generalised Additive Model 
+library(mgcViz)
+library(SemiPar)
+library(tseries)
+library(forecast)
+library(verification)
+library(scoringRules)
+library(scoringutils)
+library(dplyr)
+library(lmtest)
+library(Qtools)
+library(tidyverse)
+
+#attach(HrGabs.Int15)
+
+set.seed(170)
+
+##Comparing the qgam model at different quantile levels
+list.of.fits<-list()
+
+for(i in 1:9){
+  fit.name<-paste0('qu',i/10)
+  list.of.fits[[fit.name]]<-(qgamV(GHI~s(Hour,bs="cc")+s(Lag1)+s(Lag2)+s(Temp)+s(RH)+s(WS)+s(BP)+s(Int1)+s(Int2)+s(Int3)+s(Int4)+s(Int5)+s(Int6)+s(Int7)+s(Int8), data = train_data, qu=i/10, err=0.05))
+  }
+
+results2<-data.frame()
+
+for(i in 1:9){
+  fit.name<-paste0('qu',i/10)
+  predicted<-(predict(list.of.fits[[fit.name]], 
+                      test_data[, -which(names(test_data) == target_variable)]))
+  
+  rmse<-sqrt(mean(predicted-actual_values)^2)
+  temp<-data.frame(qu=i/10,fit.name=fit.name,rmse=rmse)
+  results2<-rbind(results2,temp)
+}
+results2
+
+set.seed(180)
+##Training the qgam at the best quantile level
+qgam<-qgamV(GHI~s(Hour,bs="cc")+s(Lag1)+s(Lag2)+s(Temp)+s(RH)+s(WS)+s(BP)+s(Int1)+s(Int2)+s(Int3)+s(Int4)+s(Int5)+s(Int6)+s(Int7)+s(Int8), data = train_data, qu=0.5, err=0.05)
+
+
+############################################
+########   Model diagnostics   #############
+############################################
+
+##Checking autocorrelation on residuals.
+#Breusch-Godfrey test
+bgtest(qgam, order=3, data=train_data)
+
+#Box-Ljung test
+e.qgam<-resid(qgam)
+Box.test(e.qgam, type="Ljung")
+
+#Using the r-squared value
+# Make predictions on the testing set
+fcs_qgam <- predict(qgam, test_data[, -which(names(test_data) == target_variable)])
+
+write.table(fcs_qgam,"~/fcs_qgam_nust.txt",sep="\t")
+
+r_squared.qgam <- cor(fcs_qgam, actual_values)^2
+r_squared.qgam
+
+AIC(qgam)
+
+#Cross validation analysis
+fcs_qgam.train <- predict(qgam, train_data)
+write.table(fcs_qgam.train,"~/fcs_qgam_nust_80.txt",sep="\t")
+
+#Goodness of fit test of the qgam model 
+win.graph()
+check.qgam(qgam, pch=25, cex=.7, interval = "confidence", level = 0.95) #qgam vignette
+
+##############################################
+######      Performance evaluation     #######
+##############################################
+
+
+######   PINBALL LOSS FUNCTION   ######
+
+library(devtools)
+library(gtools)
+library(gefcom2017)
+## tau: integer 1, 2, ... 99. Quantile to calculate pinball loss score for.
+## y: numeric. Observed value.
+## q: numeric. Predicted value for quantile tau.
+#' Calculates the pinball loss score for a given quantile.
+pinball_loss.qgam <- function(tau, y, q) {
+  pl_df <- data.frame(tau = tau,
+                      y = y,
+                      q = q)
+  pl_df <- pl_df %>%
+    mutate(L.qgam = ifelse(y>=q,
+                      tau/100 * (y-q),
+                      (1-tau/100) * (q-y)))
+  return(pl_df)
+}
+tau= 50 # tau = 75, 90, 95, 99, etc
+y= actual_values
+q= fcs_qgam
+
+z.qgam = pinball_loss.qgam(tau, y, q)
+#z
+#write.table(z,"~/pinballfplLassoI.txt",sep="\t") 
+
+qloss.qgam =z.qgam$L.qgam
+mean(qloss.qgam)
+
+#win.graph
+#a.qgam=ts(qloss.qgam)
+#plot(a.qgam)
+
+######   THE WINKLER SCORE   ######
+
+library(devtools)
+library(scoringRules)
+
+winkler_score.qgam <- function(observed, predicted, alpha) {
+  if (length(observed) != length(predicted)) {
+    stop("Lengths of observed and predicted vectors must be the same.")
+  }
+    n <- length(observed)
+  score <- 0
+    for (i in 1:n) {
+    score <- score + (1 - abs(predicted[i] - observed[i]) / alpha) * pmin(predicted[i], observed[i])
+  }
+    return(score)
+}
+observed=actual_values
+predicted=fcs_qgam
+alpha=95
+
+winkler.qgam = winkler_score.qgam(observed, predicted, alpha)/sum(actual_values)
+winkler.qgam
+
+######   CRPS EVALUATION   ######
+
+crps<-crps(actual_values, family = "normal", mean = mean(fcs_qgam), sd = sd(fcs_qgam))
+mean(crps)
+
+#Calculating the Coverage Probability
+library(readxl)  
+library(dplyr) 
+QGAM_CI_NUST<-read_xls(file.choose())
+head(QGAM_CI_NUST)
+ 
+CP.qgam<-mean(1*(QGAM_CI_NUST$y.test>QGAM_CI_NUST$ylower&QGAM_CI_NUST$y.test<QGAM_CI_NUST$yupper))
+CP.qgam
+
+###Plotting the graph of the forecasts on the observed data
+actual_values <- ts(actual_values)
+fcs_qgam <- ts(fcs_qgam)
+accuracy(fcs_qgam, actual_values)
+
+step_size <- 1
+mase(actual_values, fcs_qgam, step_size)
+
+win.graph()
+plot(actual_values)
+lines(fcs_qgam,col="red")
+```
+
+
+```{r}
+########################################################
+########      Model accuracy comparisons        ########
+########################################################
+
+#### Using Murphy diagrams
+library(forecast)
+library(murphydiagram)
+
+library(readxl)  
+library(dplyr) 
+fcs.data<-read_xls(file.choose())
+head(fcs.data)
+attach(fcs.data)
+str(fcs.data)
+
+##PLAQR vs AQR
+win.graph()
+murphydiagram(f1, f2, y, labels = c("PLAQR", "AQR"), functional = "expectile", 
+alpha = 0.5, equally_spaced = FALSE)
+
+
+###Testing that which one is more accurate than the other using Giacomini-White test.
+##PLAQR vs AQR
+ #GW(p_real=actual_values, p_pred_1=forecasts.loc[, 'plaqr'], p_pred_2=forecasts.loc[, 'aqr'], norm=1, version='multivariate')
+
+gw.test(f1, f2 , y, T = length(y), tau = 1, method = "HAC", alternative = "less")
+
+###Testing that which one is more accurate than the other using Diebold-Mariano test.
+
+resid1<-y.test-f1
+resid2<-y.test-f2
+resid3<-y.test-f3
+##PLAQR vs AQR
+dm.test(resid1, resid2, alternative = c("greater"), h = 1)#p-value=0.003
+##PLAQR vs QGAM
+dm.test(resid1, resid3, alternative = c("greater"), h = 1)#p-value=1
+##AQR vs QGAM
+dm.test(resid2, resid3, alternative = c("greater"), h = 1)#p-value=1
+```
+```{r}
+###############################################
+#####   QUANTILE REGRESSION AVERAGING    ######
+###############################################
+
+library ( quantreg )
+qra <- rq (GHI ~ fcs_plaqr+fcs_aqr+fcs_qgam, tau=0.5, data = train_data)
+
+```
+ 
+ 
+
+ 
+ 
+
+```{r}
+#Fitting a Quantile Random Forests
+library(quantregForest)
+library(tseries)
+library(forecast)
+library(verification)
+library(scoringRules)
+library(scoringutils)
+library(dplyr)
+library(lmtest)
+library(Qtools)
+library(tidyverse)
+
+attach(train_data)
+ 
+ #Defining the training variables
+DataTrain_x<-model.matrix(GHI~., train_data)[,-1]
+DataTrain_y<-train_data$GHI
+
+#Defining the testing variables
+#DataTest_x<-model.matrix(GHI~., test_data)[,-1]
+DataTest_y<-test_data$GHI
+
+set.seed(190)
+
+##Comparing the qrrf model at different quantile levels
+list.of.fits<-list()
+
+for(i in 1:9){
+  fit.name<-paste0('quantiles',i/10)
+  list.of.fits[[fit.name]]<-(quantregForest(x=DataTrain_x, y=DataTrain_y, quantiles=i/10, nthreads=20, importance=TRUE))
+  }
+
+results4<-data.frame()
+
+for(i in 1:9){
+  fit.name<-paste0('quantiles',i/10)
+  predicted<-(predict(list.of.fits[[fit.name]], 
+                      newdata=test_data[, -which(names(test_data) == target_variable)],quantiles=i/10, all=FALSE))
+  
+  rmse<-sqrt(mean(predicted-DataTest_y)^2)
+  temp<-data.frame(quantiles=i/10,fit.name=fit.name,rmse=rmse)
+  results4<-rbind(results4,temp)
+}
+results4
+
+#Training the best qrrf model
+set.seed(200)
+qrrf <- quantregForest(x=DataTrain_x, y=DataTrain_y, nthreads=20, importance=TRUE)
+
+##Viewing the best fitted qrrf model
+summary(qrrf)
+print(qrrf)
+
+
+
+
+############################################
+########   Model diagnostics   #############
+############################################
+
+##Checking autocorrelation on residuals.
+#Breusch-Godfrey test
+#bgtest(qrrf, order=3, data=train_data)
+
+
+#Box-Ljung test
+#e.qrrf<-resid(qrrf)
+#Box.test(e.qrrf, type="Ljung")
+
+
+#Using the r-squared value
+# Make predictions on the testing set
+fcs_qrrf <- predict(qrrf, newdata=test_data[, -which(names(test_data) == target_variable)], quantiles=0.5, all=FALSE)
+r_squared.qrrf <- cor(fcs_qrrf, actual_values)^2
+r_squared.qrrf
+
+
+##############################################
+######      Performance evaluation     #######
+##############################################
+
+
+######   PINBALL LOSS FUNCTION   ######
+
+library(devtools)
+library(gtools)
+library(gefcom2017)
+## tau: integer 1, 2, ... 99. Quantile to calculate pinball loss score for.
+## y: numeric. Observed value.
+## q: numeric. Predicted value for quantile tau.
+#' Calculates the pinball loss score for a given quantile.
+pinball_loss.qrrf <- function(tau, y, q) {
+  pl_df <- data.frame(tau = tau,
+                      y = y,
+                      q = q)
+  pl_df <- pl_df %>%
+    mutate(L.qrrf = ifelse(y>=q,
+                      tau/100 * (y-q),
+                      (1-tau/100) * (q-y)))
+  return(pl_df)
+}
+tau= 50 # tau = 75, 90, 95, 99, etc
+y= actual_values
+q= fcs_qrrf
+
+z.qrrf = pinball_loss.qrrf(tau, y, q)
+#z
+write.table(z.qrrf,"~/pinball.qrrf.txt",sep="\t") 
+
+qloss.qrrf =z.qrrf$L.qgam
+mean(qloss.qrrf)
+
+win.graph
+a.qrrf=ts(qloss.qrrf)
+plot(a.qrrf)
+
+######   THE WINKLER SCORE   ######
+
+library(devtools)
+library(scoringRules)
+
+winkler_score.qrrf <- function(observed, predicted, alpha) {
+  if (length(observed) != length(predicted)) {
+    stop("Lengths of observed and predicted vectors must be the same.")
+  }
+    n <- length(observed)
+  score <- 0
+    for (i in 1:n) {
+    score <- score + (1 - abs(predicted[i] - observed[i]) / alpha) * pmin(predicted[i], observed[i])
+  }
+    return(score)
+}
+observed=actual_values
+predicted=fcs_qrrf
+alpha=95
+
+winkler.qrrf = winkler_score.qrrf(observed, predicted, alpha)
+winkler.qrrf
+
+######   CRPS EVALUATION   ######
+
+crps<-crps(actual_values, family = "normal", mean = mean(fcs_qgam), sd = sd(fcs_qgam))
+mean(crps)
+
+###Plotting the graph of the forecasts on the observed data
+actual_values <- ts(actual_values)
+fcs_qrrf <- ts(fcs_qrrf)
+accuracy(fcs_qrrf, actual_values)
+
+win.graph()
+plot(actual_values)
+lines(fcs_qgam,col="red")
+
+   
+## predict 0.1, 0.2,..., 0.9 quantiles for test data
+conditionalQuantiles <- predict(qrrf, DataTest_x, what=0.1*(1:9))
+print(conditionalQuantiles[1:4,])
+
+plot(qrrf)
+
+## out-of-bag predictions and sampling
+##################################
+## for with option keep.inbag=TRUE
+#qrf <- quantregForest(x=Xtrain, y=Ytrain, keep.inbag=TRUE)
+## or use parallel version
+## qrf <- quantregForest(x=Xtrain, y=Ytrain, nthread=8)
+## get quantiles
+#oobQuantiles <- predict( qrf, what= c(0.2,0.5,0.8))
+## sample from oob-distribution
+#oobSample <- predict( qrf, what= function(x) sample(x,1))
+
+
+
+
+##Prediction interval
+predict(qrrf, test_data, interval = "confidence", level = 0.95)
+```
+``{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

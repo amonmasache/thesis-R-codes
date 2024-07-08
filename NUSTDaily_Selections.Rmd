@@ -1,0 +1,309 @@
+---
+title: "Windhoek Variable Selections"
+author: "Amon"
+date: "`r Sys.Date()`"
+output: html_document
+---
+```{r}
+library(readxl)  
+library(dplyr) 
+Windhoek_Day<-read_xls(file.choose())
+str(Windhoek_Day)
+```
+```{r}
+#Checking for multicollinearity in the data
+library(caTools)
+library(car)
+library(quantmod)
+library(MASS)
+library(corrplot)
+
+model_all <- lm(GHI_Avg ~ ., data=Windhoek_Day) # with all the independent variables in the dataframe
+summary(model_all)
+#To see the vif's of each variable
+vif(model_all) 
+#Visualize VIF Values
+vif_values <- vif(model_all) #create vector of VIF values
+barplot(vif_values, main = "VIF Values", horiz = TRUE, col = "blue") #create horizontal bar chart to display each VIF value
+abline(v = 5, lwd = 3, lty = 2) #add vertical line at 5 as after 5 there is severe correlation
+```
+
+
+
+```{r}
+#Dividing the data set into training and testing subsets prior to conducting data analysis#
+library(ISLR)
+attach(Windhoek_Day)
+
+set.seed(111)
+ind<-sample(2,nrow(Windhoek_Day),replace = T,prob=c(0.8,0.2))
+DataTrain<-Windhoek_Day[ind==1,]
+DataTest<-Windhoek_Day[ind==2,]
+
+#Defining the training variables
+DataTrain_x<-model.matrix(GHI_Avg~., DataTrain)[,-1]
+DataTrain_y<-DataTrain$GHI_Avg
+
+#Defining the testing variables
+DataTest_x<-model.matrix(GHI_Avg~., DataTest)[,-1]
+DataTest_y<-DataTest$GHI_Avg
+```
+
+
+```{r}
+#Selecting variables using shrinking methods
+#Calling up the packages to use
+library(glmnet)
+library(selectiveInference)
+library(stargazer)
+library(ggplot2)
+
+
+#Comparing the shrinking methods
+list.of.fits<-list()
+
+for(i in 0:10){
+  fit.name<-paste0('alpha',i/10)
+  list.of.fits[[fit.name]]<-(cv.glmnet(DataTrain_x,DataTrain_y, type.measure = 'mse',alpha=i/10))
+}
+results<-data.frame()
+
+for(i in 0:10){
+  fit.name<-paste0('alpha',i/10)
+  predicted<-(predict(list.of.fits[[fit.name]],
+                      s=list.of.fits[[fit.name]]$lambda.min,newx=DataTest_x))
+  
+  rmse<-sqrt(mean(predicted-DataTest_y)^2)
+  temp<-data.frame(alpha=i/10,fit.name=fit.name,rmse=rmse)
+  results<-rbind(results,temp)
+}
+results
+```
+
+
+```{r}
+#Running the best shrinkage method
+#Determining the optimal value of the tuning parameter, lambda
+set.seed(222)
+BestShrink.cv<-cv.glmnet(DataTrain_x,DataTrain_y, type.measure = 'mse',alpha=0.8, family="gaussian")
+print(BestShrink.cv)
+plot(BestShrink.cv)
+
+#Listing the coefficients
+coef(BestShrink.cv, s=BestShrink.cv$lambda.min)
+coef(BestShrink.cv, s=BestShrink.cv$lambda.1se)
+
+#Calculating the RMSE
+predicted1<-predict(BestShrink.cv, s=BestShrink.cv$lambda.min, newx=DataTest_x)
+sprintf('BestShrink.cv RMSE: %.3f', sqrt(mean((DataTest_y-predicted1)^2)))
+
+#See contributing variables
+cat('Min Lambda:',BestShrink.cv$lambda.min, '\n 1sd Lambda:', BestShrink.cv$lambda.1se)
+df_coef<-round(as.matrix(coef(BestShrink.cv, s=BestShrink.cv$lambda.min)),3)
+df_coef
+```
+
+
+
+```{r}
+#Applying QR on Shrinkage methods
+library(quantreg)
+library(rqPen)
+
+#Evaluating the PQR models on different quantile levels
+set.seed(100)
+pqr.1st <-rq.pen.cv(DataTrain_x,DataTrain_y,tau=0.1)
+predicted21<-predict(pqr.1st, newx=DataTest_x)
+sprintf('pqr.1st RMSE: %.3f', sqrt(mean((DataTest_y-predicted21)^2)))
+
+pqr.2nd <-rq.pen.cv(DataTrain_x,DataTrain_y,tau=0.2)
+predicted22<-predict(pqr.2nd, newx=DataTest_x)
+sprintf('pqr.2nd RMSE: %.3f', sqrt(mean((DataTest_y-predicted22)^2)))
+
+pqr.3rd <-rq.pen.cv(DataTrain_x,DataTrain_y,tau=0.3)
+predicted23<-predict(pqr.3rd, newx=DataTest_x)
+sprintf('pqr.3rd RMSE: %.3f', sqrt(mean((DataTest_y-predicted23)^2)))
+
+pqr.4th <-rq.pen.cv(DataTrain_x,DataTrain_y,tau=0.4)
+predicted24<-predict(pqr.4th, newx=DataTest_x)
+sprintf('pqr.4th RMSE: %.3f', sqrt(mean((DataTest_y-predicted24)^2)))
+
+pqr.5th <-rq.pen.cv(DataTrain_x,DataTrain_y,tau=0.5)
+predicted25<-predict(pqr.5th, newx=DataTest_x)
+sprintf('pqr.5th RMSE: %.3f', sqrt(mean((DataTest_y-predicted25)^2)))
+
+pqr.6th <-rq.pen.cv(DataTrain_x,DataTrain_y,tau=0.6)
+predicted26<-predict(pqr.6th, newx=DataTest_x)
+sprintf('pqr.6th RMSE: %.3f', sqrt(mean((DataTest_y-predicted26)^2)))
+
+pqr.7th <-rq.pen.cv(DataTrain_x,DataTrain_y,tau=0.7)
+predicted27<-predict(pqr.7th, newx=DataTest_x)
+sprintf('pqr.7th RMSE: %.3f', sqrt(mean((DataTest_y-predicted27)^2)))
+
+pqr.8th <-rq.pen.cv(DataTrain_x,DataTrain_y,tau=0.8)
+predicted28<-predict(pqr.8th, newx=DataTest_x)
+sprintf('pqr.8th RMSE: %.3f', sqrt(mean((DataTest_y-predicted28)^2)))
+
+pqr.9th <-rq.pen.cv(DataTrain_x,DataTrain_y,tau=0.9)
+predicted29<-predict(pqr.9th, newx=DataTest_x)
+sprintf('pqr.9th RMSE: %.3f', sqrt(mean((DataTest_y-predicted29)^2)))
+
+#Stats inference at the best quantile level
+pqr.6th <-rq.pen.cv(DataTrain_x,DataTrain_y,tau=0.6)
+print(pqr.6th)
+coef(pqr.6th)
+```
+
+```{r}
+#Selecting variables using the Boruta algorithm
+#Setting libraries
+library(Boruta)
+library(mlbench)
+#library(caret)
+library(randomForest)
+```
+
+
+```{r}
+
+#The Boruta feature selection
+set.seed(333)
+boruta<-Boruta(GHI_Avg~., data=Windhoek_Day, doTrace=2, maxRuns=500)
+attStats(boruta)
+
+#Variable importance scores
+roughFixMod<-TentativeRoughFix(boruta)
+imps<-attStats(roughFixMod)
+imps2 <-imps[imps$decision != 'Rejected', c('meanImp', 'decision')]
+print(imps2)
+
+
+plot(boruta, las=2, cex.axis=0.6)
+plotImpHistory(boruta)
+
+#finding a better random forest model btwn all variables, the Boruta that includes tentantives or with confirmed variables only
+#1) Start with a random forest with all of the variables
+set.seed(333)
+rf.all<-randomForest(GHI_Avg~., data = DataTrain)
+predicted3<-predict(rf.all, newx=DataTest_x)
+rf.all.RMSE<-sqrt(mean((DataTest_y-predicted3)^2))
+sprintf('rf.all RMSE: %.3f', sqrt(mean((DataTest_y-predicted3)^2)))
+
+#2) Then a random forest with non rejected variables
+getNonRejectedFormula(boruta)
+set.seed(444)
+rf.nonreject<-randomForest(GHI_Avg ~ Year + Month + Day + DIF_Avg + DNI_Avg + DNI_Max + 
+    DNICalc_Avg + DNICalc_Max + Temp_Avg + Temp_Min + Temp_Max + 
+    RH_Avg + RH_Min + RH_Max + Rain_Tot + WS_Avg + WVec_Mag_Avg + 
+    WD_Avg + WD_StdDev + WS_Max + BP_Avg + BP_Min + BP_Max + 
+    LoggerTemp_Avg + LoggerTemp_Min + LoggerTemp_Max + Bat12V_Avg + 
+    Bat12V_Min + Bat12V_Max + Bat24V_Avg + Bat24V_Min + Bat24V_Max, data = DataTrain)
+predicted4<-predict(rf.nonreject, newx=DataTest_x)
+rf.nonrejected.RMSE<-sqrt(mean((DataTest_y-predicted4)^2))
+sprintf('rf.nonrejected RMSE: %.3f', sqrt(mean((DataTest_y-predicted4)^2)))
+
+#3) Lastly a random forest with confirmed variables only
+getConfirmedFormula(boruta)
+set.seed(555)
+rf.confirmed<-randomForest(GHI_Avg ~ Year + Month + Day + DIF_Avg + DNI_Avg + DNI_Max + 
+    DNICalc_Avg + DNICalc_Max + Temp_Avg + Temp_Min + Temp_Max + 
+    RH_Avg + RH_Min + RH_Max + Rain_Tot + WS_Avg + WVec_Mag_Avg + 
+    WD_Avg + WD_StdDev + WS_Max + BP_Avg + BP_Min + BP_Max + 
+    LoggerTemp_Avg + LoggerTemp_Min + LoggerTemp_Max + Bat12V_Avg + 
+    Bat12V_Min + Bat12V_Max + Bat24V_Avg + Bat24V_Min + Bat24V_Max, data = DataTrain)
+predicted5<-predict(rf.confirmed, newx=DataTest_x)
+rf.confirmed.RMSE<-sqrt(mean((DataTest_y-predicted5)^2))
+sprintf('rf.confirmed RMSE: %.3f', sqrt(mean((DataTest_y-predicted5)^2))) 
+
+#Best Boruta
+sprintf('rf.all RMSE: %.3f', sqrt(mean((DataTest_y-predicted3)^2)))
+sprintf('rf.nonrejected RMSE: %.3f', sqrt(mean((DataTest_y-predicted4)^2)))
+sprintf('rf.confirmed RMSE: %.3f', sqrt(mean((DataTest_y-predicted5)^2)))
+Best.boruta<-min(rf.all.RMSE, rf.nonrejected.RMSE, rf.confirmed.RMSE)
+sprintf('Best.boruta RMSE: %.3f', Best.boruta)
+
+#4) Regularized RF
+library(RRF)
+set.seed(666)
+rrf.NUST<-RRF(GHI_Avg~., data = DataTrain, ntree=1000, keep.forest=TRUE,
+importance=TRUE)
+rrf.NUST$feaSet
+importance(rrf.NUST, sort=2)
+varImpPlot(rrf.NUST)
+predicted5<-predict(rrf.NUST, newx=DataTest_x)
+sprintf('rrf.NUST RMSE: %.3f', sqrt(mean((DataTest_y-predicted5)^2)))
+
+
+#Comparing the RMSE of best models from each group of Shrinkages and RFs
+sprintf('BestShrink.cv RMSE: %.3f', sqrt(mean((DataTest_y-predicted1)^2)))
+#sprintf('BestBoruta RMSE: %.3f', Best.boruta)
+sprintf('rrf RMSE: %.3f', sqrt(mean((DataTest_y-predicted5)^2)))
+```
+
+
+```{r}
+#Applying QR on Random Forests
+library(quantregForest)
+set.seed(777)
+qrf <- quantregForest(x=DataTrain_x, y=DataTrain_y, nthreads=20, importance=TRUE)
+print(qrf)
+qrf$importance
+
+
+
+#Finding the best quantile level
+predicted6<-predict(qrf, DataTest_x, what=0.1)
+predicted7<-predict(qrf, DataTest_x, what=0.2)
+predicted8<-predict(qrf, DataTest_x, what=0.3)
+predicted9<-predict(qrf, DataTest_x, what=0.4)
+predicted10<-predict(qrf, DataTest_x, what=0.5)
+predicted11<-predict(qrf, DataTest_x, what=0.6)
+predicted12<-predict(qrf, DataTest_x, what=0.7)
+predicted13<-predict(qrf, DataTest_x, what=0.8)
+predicted14<-predict(qrf, DataTest_x, what=0.9)
+sprintf('10th.qrf RMSE: %.3f', sqrt(mean((DataTest_y-predicted6)^2)))
+sprintf('20th.qrf RMSE: %.3f', sqrt(mean((DataTest_y-predicted7)^2)))
+sprintf('30th.qrf RMSE: %.3f', sqrt(mean((DataTest_y-predicted8)^2)))
+sprintf('40th.qrf RMSE: %.3f', sqrt(mean((DataTest_y-predicted9)^2)))
+sprintf('50th.qrf RMSE: %.3f', sqrt(mean((DataTest_y-predicted10)^2)))
+sprintf('60th.qrf RMSE: %.3f', sqrt(mean((DataTest_y-predicted11)^2)))
+sprintf('70th.qrf RMSE: %.3f', sqrt(mean((DataTest_y-predicted12)^2)))
+sprintf('80th.qrf RMSE: %.3f', sqrt(mean((DataTest_y-predicted13)^2)))
+sprintf('90th.qrf RMSE: %.3f', sqrt(mean((DataTest_y-predicted14)^2)))
+
+## to use other functions of the package randomForest, convert class back
+#library(randomForest)
+#class(qrf) <- "randomForest"
+#importance(qrf,quantile=0.5) ## importance measure from the standard RF
+```
+
+
+```{r}
+#Evaluation of all the best models in each group of methods
+library(MLeval)
+models<-list()
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
